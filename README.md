@@ -549,12 +549,6 @@ cargo run --example simd_demo --no-default-features --release
 cargo bench --bench simd_benchmarks
 ```
 
-### Learn More
-
-- 📖 [SIMD User Guide](src/simd/README.md) - Detailed documentation
-- 📋 [Integration Plan](SIMD_INTEGRATION_PLAN.md) - Technical implementation details
-- 📊 [Summary](SIMD_SUMMARY.md) - Quick overview and status
-
 ## Running Benchmarks
 
 ```bash
