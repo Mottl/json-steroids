@@ -329,6 +329,7 @@ where
             result.insert(K::from(key.into_owned()), value);
         }
 
+        parser.expect_object_end()?;
         Ok(result)
     }
 }
@@ -364,6 +365,7 @@ where
             result.insert(K::from(key.into_owned()), value);
         }
 
+        parser.expect_object_end()?;
         Ok(result)
     }
 }

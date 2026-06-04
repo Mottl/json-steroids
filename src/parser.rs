@@ -14,6 +14,7 @@ use std::borrow::Cow;
 const MAX_DEPTH: usize = 128;
 
 /// Lookup table for whitespace bytes (space, tab, newline, carriage-return)
+#[cfg(not(feature = "simd"))]
 static WS: [bool; 256] = {
     let mut t = [false; 256];
     t[b' ' as usize] = true;
@@ -130,17 +131,26 @@ impl<'a> JsonParser<'a> {
         self.pos += 1;
     }
 
-    /// Skip whitespace characters efficiently using a lookup table
+    /// Skip whitespace characters efficiently using SIMD when available
     #[inline]
     fn skip_whitespace(&mut self) {
-        let input = self.input;
-        let mut pos = self.pos;
-        unsafe {
-            while pos < self.len && *WS.get_unchecked(input[pos] as usize) {
-                pos += 1;
-            }
+        #[cfg(feature = "simd")]
+        {
+            self.pos = crate::simd::skip_whitespace(self.input, self.pos);
+            return;
         }
-        self.pos = pos;
+
+        #[cfg(not(feature = "simd"))]
+        {
+            let input = self.input;
+            let mut pos = self.pos;
+            unsafe {
+                while pos < self.len && *WS.get_unchecked(input[pos] as usize) {
+                    pos += 1;
+                }
+            }
+            self.pos = pos;
+        }
     }
 
     /// Check if next non-whitespace character is a string quote
@@ -184,38 +194,73 @@ impl<'a> JsonParser<'a> {
         self.advance();
 
         let start = self.pos;
-        let mut has_escapes = false;
 
-        unsafe {
-            // Fast path: scan for end quote or escape
-            while self.pos < self.len {
-                match self.input.get_unchecked(self.pos) {
-                    // bounds check once per loop
-                    b'"' => {
-                        if has_escapes {
-                            // Need to process escapes
-                            let raw = &self.input.get_unchecked(start..self.pos);
-                            self.advance(); // consume closing quote
-                            return self.unescape_string(raw);
-                        } else {
-                            // Zero-copy path: no escapes found
-                            let s = std::str::from_utf8_unchecked(
-                                self.input.get_unchecked(start..self.pos),
-                            );
-                            self.advance(); // consume closing quote
-                            return Ok(Cow::Borrowed(s));
-                        }
-                    }
-                    b'\\' => {
-                        has_escapes = true;
-                        self.pos += 2; // skip escape sequence
-                    }
-                    _ => self.pos += 1,
-                }
+        // SIMD-accelerated string scanning
+        #[cfg(feature = "simd")]
+        {
+            let result = crate::simd::scan_string(self.input, start);
+
+            // Check if we found the closing quote
+            if result.position >= self.len {
+                return Err(JsonError::UnexpectedEnd);
+            }
+
+            // Verify it's actually a quote (not just end of input)
+            if unsafe { *self.input.get_unchecked(result.position) } != b'"' {
+                return Err(JsonError::UnexpectedEnd);
+            }
+
+            if result.has_escapes {
+                // Process escapes
+                let raw = unsafe { self.input.get_unchecked(start..result.position) };
+                self.pos = result.position + 1; // consume closing quote
+                return self.unescape_string(raw);
+            } else {
+                // Zero-copy path: no escapes found
+                let s = unsafe {
+                    std::str::from_utf8_unchecked(self.input.get_unchecked(start..result.position))
+                };
+                self.pos = result.position + 1; // consume closing quote
+                return Ok(Cow::Borrowed(s));
             }
         }
 
-        Err(JsonError::UnexpectedEnd)
+        // Fallback: original scalar implementation
+        #[cfg(not(feature = "simd"))]
+        {
+            let mut has_escapes = false;
+
+            unsafe {
+                // Fast path: scan for end quote or escape
+                while self.pos < self.len {
+                    match self.input.get_unchecked(self.pos) {
+                        // bounds check once per loop
+                        b'"' => {
+                            if has_escapes {
+                                // Need to process escapes
+                                let raw = &self.input.get_unchecked(start..self.pos);
+                                self.advance(); // consume closing quote
+                                return self.unescape_string(raw);
+                            } else {
+                                // Zero-copy path: no escapes found
+                                let s = std::str::from_utf8_unchecked(
+                                    self.input.get_unchecked(start..self.pos),
+                                );
+                                self.advance(); // consume closing quote
+                                return Ok(Cow::Borrowed(s));
+                            }
+                        }
+                        b'\\' => {
+                            has_escapes = true;
+                            self.pos += 2; // skip escape sequence
+                        }
+                        _ => self.pos += 1,
+                    }
+                }
+            }
+
+            Err(JsonError::UnexpectedEnd)
+        }
     }
 
     /// Unescape a string with escape sequences

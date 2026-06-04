@@ -10,6 +10,10 @@ edition = "2021"
 description = "Blazing fast JSON serialization and deserialization library, powered by procedural macros."
 license = "MIT"
 
+[features]
+default = ["simd"]
+simd = []
+
 [dependencies]
 json-steroids-derive = { path = "./json-steroids-derive", version = "0.2.0"}
 itoa = "1.0"
@@ -23,3 +27,9 @@ serde_json = "1.0"
 [[bench]]
 name = "benchmarks"
 harness = false
+
+[[bench]]
+name = "simd_benchmarks"
+harness = false
+required-features = ["simd"]
+

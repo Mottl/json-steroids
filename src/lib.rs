@@ -31,6 +31,9 @@ mod traits;
 mod value;
 pub mod writer;
 
+#[cfg(feature = "simd")]
+pub mod simd;
+
 pub use error::{JsonError, Result};
 pub use parser::JsonParser;
 pub use traits::{JsonDeserialize, JsonSerialize};

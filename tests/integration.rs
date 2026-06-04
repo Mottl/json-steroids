@@ -76,6 +76,26 @@ struct AllPrimitives {
     s: String,
 }
 
+#[derive(Debug, PartialEq, Json)]
+struct Endpoint {
+    url: String,
+    healthy: bool,
+}
+
+#[derive(Debug, PartialEq, Json)]
+struct Service {
+    endpoints: HashMap<String, Endpoint>,
+    retries: u32,
+}
+
+#[derive(Debug, PartialEq, Json)]
+struct RoutingTable {
+    name: String,
+    services: HashMap<String, HashMap<String, Service>>,
+    labels: HashMap<String, String>,
+    enabled: bool,
+}
+
 // ─────────────────────────────────────────────
 // 1. Primitive round-trips
 // ─────────────────────────────────────────────
@@ -367,6 +387,82 @@ fn hashmap_roundtrip() {
     m.insert("key".to_string(), "value".to_string());
     let rt: HashMap<String, String> = from_str(&to_string(&m)).unwrap();
     assert_eq!(rt, m);
+}
+
+#[test]
+fn nested_hashmap_roundtrip_multiple_outer_keys() {
+    let mut billing: HashMap<String, Vec<i32>> = HashMap::new();
+    billing.insert("primary".to_string(), vec![10, 20]);
+    billing.insert("backup".to_string(), vec![30]);
+
+    let mut search: HashMap<String, Vec<i32>> = HashMap::new();
+    search.insert("primary".to_string(), vec![40, 50]);
+    search.insert("canary".to_string(), vec![]);
+
+    let mut m: HashMap<String, HashMap<String, Vec<i32>>> = HashMap::new();
+    m.insert("billing".to_string(), billing);
+    m.insert("search".to_string(), search);
+
+    let rt: HashMap<String, HashMap<String, Vec<i32>>> = from_str(&to_string(&m)).unwrap();
+    assert_eq!(rt, m);
+}
+
+#[test]
+fn struct_with_multiple_nested_hashmaps_from_json() {
+    let json = r#"{
+        "name":"prod-routing",
+        "services":{
+            "billing":{
+                "v1":{
+                    "endpoints":{
+                        "primary":{"url":"https://billing.example/v1","healthy":true},
+                        "backup":{"url":"https://billing-backup.example/v1","healthy":false}
+                    },
+                    "retries":3
+                },
+                "v2":{
+                    "endpoints":{
+                        "primary":{"url":"https://billing.example/v2","healthy":true}
+                    },
+                    "retries":1
+                }
+            },
+            "search":{
+                "v1":{
+                    "endpoints":{
+                        "primary":{"url":"https://search.example/v1","healthy":true}
+                    },
+                    "retries":2
+                }
+            }
+        },
+        "labels":{"team":"platform","tier":"critical"},
+        "enabled":true
+    }"#;
+
+    let parsed: RoutingTable = from_str(json).unwrap();
+
+    assert_eq!(parsed.name, "prod-routing");
+    assert!(parsed.enabled);
+    assert_eq!(parsed.labels["team"], "platform");
+    assert_eq!(parsed.labels["tier"], "critical");
+    assert_eq!(parsed.services.len(), 2);
+    assert_eq!(parsed.services["billing"].len(), 2);
+    assert_eq!(parsed.services["search"].len(), 1);
+
+    let billing_v1 = &parsed.services["billing"]["v1"];
+    assert_eq!(billing_v1.retries, 3);
+    assert_eq!(billing_v1.endpoints.len(), 2);
+    assert_eq!(
+        billing_v1.endpoints["primary"],
+        Endpoint {
+            url: "https://billing.example/v1".to_string(),
+            healthy: true,
+        }
+    );
+
+    let reparsed: RoutingTable = from_str(&to_string(&parsed)).unwrap();
+    assert_eq!(reparsed, parsed);
 }
 
 // ─────────────────────────────────────────────

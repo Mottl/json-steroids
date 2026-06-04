@@ -7,6 +7,7 @@
 
 /// Lookup table: 0 = safe byte, 1 = needs escaping
 /// Covers bytes 0x00-0xFF. Bytes < 0x20, '"', and '\\' need escaping.
+#[cfg(not(feature = "simd"))]
 static NEEDS_ESCAPE: [bool; 256] = {
     let mut table = [false; 256];
     let mut i = 0u8;
@@ -461,22 +462,33 @@ impl Writer for PrettyWriter {
 
 /// Single-pass string escaping: copies clean byte runs in bulk,
 /// only pays the per-byte cost when an escape is actually needed.
+/// Uses SIMD acceleration when available for faster escape detection.
 #[inline]
 fn write_escaped_string(buffer: &mut Vec<u8>, s: &str) {
     let bytes = s.as_bytes();
     let mut start = 0;
 
-    for i in 0..bytes.len() {
-        let byte = unsafe { *bytes.get_unchecked(i) };
+    #[cfg(feature = "simd")]
+    {
+        // SIMD-accelerated escape detection
+        while start < bytes.len() {
+            let pos = crate::simd::find_escape_needed(bytes, start);
 
-        if unsafe { *NEEDS_ESCAPE.get_unchecked(byte as usize) } {
-            // Write any accumulated clean bytes
-            if start < i {
-                buffer.extend_from_slice(&bytes[start..i]);
+            if pos == bytes.len() {
+                // No more escapes - copy rest of string
+                buffer.extend_from_slice(&bytes[start..]);
+                return;
+            }
+
+            // Copy clean bytes before the escape
+            if start < pos {
+                buffer.extend_from_slice(&bytes[start..pos]);
             }
 
             // Write the escape sequence
+            let byte = unsafe { *bytes.get_unchecked(pos) };
             buffer.push(b'\\');
+
             let escaped = match byte {
                 b'"' => b'"',
                 b'\\' => b'\\',
@@ -493,18 +505,59 @@ fn write_escaped_string(buffer: &mut Vec<u8>, s: &str) {
                     let hex_digits = b"0123456789abcdef";
                     buffer.push(hex_digits[(byte >> 4) as usize]);
                     buffer.push(hex_digits[(byte & 0x0F) as usize]);
-                    start = i + 1;
+                    start = pos + 1;
                     continue;
                 }
             };
             buffer.push(escaped);
-            start = i + 1;
+            start = pos + 1;
         }
+        return;
     }
 
-    // Write any remaining clean bytes
-    if start < bytes.len() {
-        buffer.extend_from_slice(&bytes[start..]);
+    // Fallback: original scalar implementation
+    #[cfg(not(feature = "simd"))]
+    {
+        for i in 0..bytes.len() {
+            let byte = unsafe { *bytes.get_unchecked(i) };
+
+            if unsafe { *NEEDS_ESCAPE.get_unchecked(byte as usize) } {
+                // Write any accumulated clean bytes
+                if start < i {
+                    buffer.extend_from_slice(&bytes[start..i]);
+                }
+
+                // Write the escape sequence
+                buffer.push(b'\\');
+                let escaped = match byte {
+                    b'"' => b'"',
+                    b'\\' => b'\\',
+                    b'\n' => b'n',
+                    b'\r' => b'r',
+                    b'\t' => b't',
+                    b'\x08' => b'b', // backspace
+                    b'\x0C' => b'f', // form feed
+                    _ => {
+                        // Unicode escape for other control characters
+                        buffer.push(b'u');
+                        buffer.push(b'0');
+                        buffer.push(b'0');
+                        let hex_digits = b"0123456789abcdef";
+                        buffer.push(hex_digits[(byte >> 4) as usize]);
+                        buffer.push(hex_digits[(byte & 0x0F) as usize]);
+                        start = i + 1;
+                        continue;
+                    }
+                };
+                buffer.push(escaped);
+                start = i + 1;
+            }
+        }
+
+        // Write any remaining clean bytes
+        if start < bytes.len() {
+            buffer.extend_from_slice(&bytes[start..]);
+        }
     }
 }
 
