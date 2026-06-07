@@ -57,48 +57,56 @@ fn main() {
 
 ## Performance Benchmarks
 
-Comprehensive benchmark comparison between json-steroids and serde_json. All benchmarks measured with Criterion on Apple M4 Max.
+Comprehensive benchmark comparison between `json-steroids`, `serde_json`, and `sonic_rs`. Results are Criterion mean estimates from an Apple M4 Max run with native CPU flags:
 
-| Category | Benchmark | Description | json-steroids | serde_json | Result |
-|----------|-----------|-------------|---------------|------------|--------|
-| **🚀 Zero-Copy** | `borrowed_str_struct_deserialize` | Struct with 3 &str fields (zero-copy) | **35.9 ns** | 59.4 ns | ✅ **1.7x faster** |
-| **🚀 Zero-Copy** | `cow_struct_deserialize` | Struct with 4 Cow<str> fields (zero-copy) | **67.1 ns** | 126.6 ns | ✅ **1.9x faster** |
-| **🚀 Zero-Copy** | `zero_copy_vec_strings` | Vec of 4 Cow<str> strings (zero-copy) | **102.9 ns** | 274.6 ns | ✅ **2.7x faster** |
-| **🚀 Zero-Copy** | `cow_struct_serialize` | Serialize struct with Cow<str> fields | **52.0 ns** | 95.9 ns | ✅ **1.8x faster** |
-| **📤 Serialization** | `serialize_simple` | Simple struct (3 fields: String, i64, bool) | **21.9 ns** | 36.3 ns | ✅ **1.7x faster** |
-| **📤 Serialization** | `serialize_complex` | Complex nested struct with arrays | **94.3 ns** | 162.3 ns | ✅ **1.7x faster** |
-| **📤 Serialization** | `many_fields_serialize` | Struct with 15 mixed-type fields | **107.9 ns** | 203.0 ns | ✅ **1.9x faster** |
-| **📤 Serialization** | `large_array_serialize` | Array of 1000 integers | **2.78 μs** | 2.92 μs | ✅ **1.05x faster** |
-| **📥 Deserialization** | `deserialize_simple` | Simple struct (3 fields: String, i64, bool) | **41.7 ns** | 50.4 ns | ✅ **1.2x faster** |
-| **📥 Deserialization** | `deserialize_complex` | Complex nested struct with arrays | **273.3 ns** | 365.5 ns | ✅ **1.3x faster** |
-| **📥 Deserialization** | `many_fields_deserialize` | Struct with 15 mixed-type fields | **261.5 ns** | 352.4 ns | ✅ **1.3x faster** |
-| **📥 Deserialization** | `large_array_deserialize` | Array of 1000 integers | **3.88 μs** | 6.48 μs | ✅ **1.7x faster** |
-| **🔄 Round-Trip** | `roundtrip_complex` | Serialize + deserialize complex struct | **395.2 ns** | 533.8 ns | ✅ **1.4x faster** |
-| **🎯 Dynamic** | `parse_dynamic` | Parse to JsonValue (structure unknown) | **211.7 ns** | 330.5 ns | ✅ **1.6x faster** |
-| **🎯 Dynamic** | `deeply_nested_parse` | Parse deeply nested JSON (64+ levels) | **426.5 ns** | 666.2 ns | ✅ **1.6x faster** |
-| **📤 Serialization** | `string_serialize_with_escapes` | String with escape sequences (\n, \t, etc.) | 46.4 ns | **43.4 ns** | ⚠️ 0.94x |
-| **📤 Serialization** | `string_serialize_no_escapes` | Plain string without escapes | 30.3 ns | **28.8 ns** | ⚠️ 0.95x |
+```bash
+RUSTFLAGS="-C target-cpu=native" cargo bench --bench benchmarks
+```
+
+Lower is better. The fastest result in each row is highlighted.
+
+| Benchmark | json-steroids | serde_json | sonic_rs | Winner |
+|----------|---------------|------------|----------|--------|
+| `serialize_simple` | **23.2 ns** | 43.3 ns | 35.2 ns | json-steroids |
+| `deserialize_simple` | **47.9 ns** | 54.6 ns | 75.8 ns | json-steroids |
+| `serialize_complex` | **99.4 ns** | 207.8 ns | 189.0 ns | json-steroids |
+| `deserialize_complex` | **406.4 ns** | 586.4 ns | 612.0 ns | json-steroids |
+| `roundtrip_complex` | **530.7 ns** | 853.6 ns | 833.2 ns | json-steroids |
+| `parse_dynamic` | 420.9 ns | 536.3 ns | **165.6 ns** | sonic_rs |
+| `large_array_serialize` | **3.43 us** | 3.51 us | 3.82 us | json-steroids |
+| `large_array_deserialize` | **4.36 us** | 7.29 us | 8.58 us | json-steroids |
+| `string_serialize_no_escapes` | **22.4 ns** | 34.2 ns | 61.4 ns | json-steroids |
+| `string_serialize_with_escapes` | 69.2 ns | **48.4 ns** | 88.0 ns | serde_json |
+| `deeply_nested_parse` | 837.0 ns | 952.8 ns | **312.0 ns** | sonic_rs |
+| `many_fields_serialize` | **124.3 ns** | 241.8 ns | 216.9 ns | json-steroids |
+| `many_fields_deserialize` | **391.0 ns** | 446.6 ns | 465.7 ns | json-steroids |
+| `integers_serialize` | 3.85 us | **3.65 us** | 3.97 us | serde_json |
+| `floats_serialize` | 18.09 us | 12.95 us | **12.88 us** | sonic_rs |
+| `cow_struct_deserialize` | **67.4 ns** | 188.7 ns | 214.0 ns | json-steroids |
+| `cow_struct_serialize` | **50.7 ns** | 132.0 ns | 121.5 ns | json-steroids |
+| `borrowed_str_struct_deserialize` | **38.7 ns** | 66.0 ns | 65.1 ns | json-steroids |
 
 ### Performance Summary
 
-- ✅ **json-steroids wins: 14 of 17 benchmarks** (82%)
-- 🚀 **1.7-2.7x faster** for zero-copy operations with `Cow<'de, str>` and `&'de str`
-- ⚡ **21-88% faster** for typical serialize/deserialize workloads
-- 📊 **67% faster** for large array deserialization
-- 🎯 **Best use cases**: Zero-copy strings, structs, arrays, complex structures, dynamic parsing
-- ⚠️ **serde_json wins**: String escaping (6%), simple strings (5%)
+- **json-steroids wins 13 of 18 benchmark groups** in this run.
+- **Typed struct round-trips are the strongest path**: `roundtrip_complex` is about 1.6x faster than `serde_json` and `sonic_rs`.
+- **Zero-copy deserialization is a major advantage**: `cow_struct_deserialize` is about 2.8x faster than `serde_json`, and borrowed `&str` struct deserialization is about 1.7x faster.
+- **Large integer arrays deserialize quickly**: `large_array_deserialize` is about 1.7x faster than `serde_json` and about 2.0x faster than `sonic_rs`.
+- **sonic_rs is still the best choice for DOM-heavy dynamic parsing** in these benchmarks, especially `parse_dynamic` and `deeply_nested_parse`.
+- **Known slower paths**: escaped string serialization, float serialization, and dynamic DOM parsing compared with `sonic_rs`.
 
 ### Why Choose json-steroids?
 
-**Optimized for real-world use cases:**
-- 🚀 **Zero-copy string parsing** - Strings without escape sequences are borrowed directly (`Cow::Borrowed`)
-- 📦 **Complex nested structures** - 20-35% faster serialization and deserialization
-- 🔍 **Dynamic JSON parsing** - 60% faster when structure is unknown
-- 🎯 **Type-safe numbers** - Specific methods for each integer/float type (no implicit conversions)
-- 💾 **Memory efficient** - Pre-allocated buffers, minimal reallocations
-- 🛠️ **Production ready** - Handles Unicode escapes, surrogate pairs, all JSON edge cases
+**Optimized for real-world typed JSON workloads:**
+- **Zero-copy string parsing** - Strings without escape sequences are borrowed directly (`Cow::Borrowed`)
+- **Fast typed derive path** - Strong results for simple, complex, and many-field structs
+- **Fast round-trips** - Efficient serializer plus typed parser for request/response style workloads
+- **Large array deserialization** - Efficient integer parsing for dense numeric payloads
+- **Type-safe numbers** - Specific methods for each integer/float type (no implicit conversions)
+- **Memory efficient** - Pre-allocated buffers, minimal reallocations
+- **Production ready** - Handles Unicode escapes, surrogate pairs, all JSON edge cases
 
-> **Note**: Run `cargo bench` to measure performance on your hardware. Results may vary based on CPU architecture and workload patterns.
+> **Note**: Benchmarks vary by CPU, compiler flags, input shape, and feature flags. Run `cargo bench --bench benchmarks` on your own workload before making performance-sensitive decisions.
 
 ### Key Performance Features
 
@@ -133,7 +141,7 @@ let result: Cow<str> = from_str(json).unwrap();
 assert!(matches!(result, Cow::Owned(_))); // Owned only when necessary
 ```
 
-**Performance advantage**: json-steroids with `Cow<'de, str>` is ~30% faster than serde_json's zero-copy mode and ~2x faster for serialization!
+**Performance advantage**: In the benchmark suite above, json-steroids with `Cow<'de, str>` is about 2.8x faster than serde_json's zero-copy mode for deserialization and about 2.6x faster for serialization.
 
 ### Running Benchmarks
 
@@ -568,4 +576,3 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 ## Contributing
 
 Contributions are welcome! Please feel free to submit a Pull Request.
-

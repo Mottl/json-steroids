@@ -5,7 +5,7 @@ members = [
 
 [package]
 name = "json-steroids"
-version = "0.3.0"
+version = "0.3.1"
 edition = "2021"
 description = "Blazing fast JSON serialization and deserialization library, powered by procedural macros."
 license = "MIT"
@@ -23,6 +23,7 @@ ryu = "1.0"
 criterion = "0.5"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
+sonic-rs = "0.5.8"
 
 [[bench]]
 name = "benchmarks"

@@ -13,8 +13,11 @@ use std::borrow::Cow;
 /// Maximum nesting depth to prevent stack overflow
 const MAX_DEPTH: usize = 128;
 
+/// Short JSON strings are usually object keys, where SIMD setup costs more than it saves.
+#[cfg(feature = "simd")]
+const STRING_SIMD_MIN_LEN: usize = 64;
+
 /// Lookup table for whitespace bytes (space, tab, newline, carriage-return)
-#[cfg(not(feature = "simd"))]
 static WS: [bool; 256] = {
     let mut t = [false; 256];
     t[b' ' as usize] = true;
@@ -131,26 +134,17 @@ impl<'a> JsonParser<'a> {
         self.pos += 1;
     }
 
-    /// Skip whitespace characters efficiently using SIMD when available
+    /// Skip whitespace characters efficiently.
     #[inline]
     fn skip_whitespace(&mut self) {
-        #[cfg(feature = "simd")]
-        {
-            self.pos = crate::simd::skip_whitespace(self.input, self.pos);
-            return;
-        }
-
-        #[cfg(not(feature = "simd"))]
-        {
-            let input = self.input;
-            let mut pos = self.pos;
-            unsafe {
-                while pos < self.len && *WS.get_unchecked(input[pos] as usize) {
-                    pos += 1;
-                }
+        let input = self.input;
+        let mut pos = self.pos;
+        unsafe {
+            while pos < self.len && *WS.get_unchecked(input[pos] as usize) {
+                pos += 1;
             }
-            self.pos = pos;
         }
+        self.pos = pos;
     }
 
     /// Check if next non-whitespace character is a string quote
@@ -198,7 +192,31 @@ impl<'a> JsonParser<'a> {
         // SIMD-accelerated string scanning
         #[cfg(feature = "simd")]
         {
-            let result = crate::simd::scan_string(self.input, start);
+            let mut pos = start;
+            let scalar_end = self.len.min(start + STRING_SIMD_MIN_LEN);
+
+            unsafe {
+                while pos < scalar_end {
+                    match self.input.get_unchecked(pos) {
+                        b'"' => {
+                            let s =
+                                std::str::from_utf8_unchecked(self.input.get_unchecked(start..pos));
+                            self.pos = pos + 1;
+                            return Ok(Cow::Borrowed(s));
+                        }
+                        b'\\' => {
+                            return self.parse_string_scalar_from(start, pos + 2, true);
+                        }
+                        _ => pos += 1,
+                    }
+                }
+            }
+
+            if pos >= self.len {
+                return Err(JsonError::UnexpectedEnd);
+            }
+
+            let result = crate::simd::scan_string(self.input, pos);
 
             // Check if we found the closing quote
             if result.position >= self.len {
@@ -228,39 +246,41 @@ impl<'a> JsonParser<'a> {
         // Fallback: original scalar implementation
         #[cfg(not(feature = "simd"))]
         {
-            let mut has_escapes = false;
+            self.parse_string_scalar_from(start, start, false)
+        }
+    }
 
-            unsafe {
-                // Fast path: scan for end quote or escape
-                while self.pos < self.len {
-                    match self.input.get_unchecked(self.pos) {
-                        // bounds check once per loop
-                        b'"' => {
-                            if has_escapes {
-                                // Need to process escapes
-                                let raw = &self.input.get_unchecked(start..self.pos);
-                                self.advance(); // consume closing quote
-                                return self.unescape_string(raw);
-                            } else {
-                                // Zero-copy path: no escapes found
-                                let s = std::str::from_utf8_unchecked(
-                                    self.input.get_unchecked(start..self.pos),
-                                );
-                                self.advance(); // consume closing quote
-                                return Ok(Cow::Borrowed(s));
-                            }
+    /// Continue scanning a JSON string with scalar byte checks.
+    #[inline]
+    fn parse_string_scalar_from(
+        &mut self,
+        start: usize,
+        mut pos: usize,
+        mut has_escapes: bool,
+    ) -> Result<Cow<'a, str>> {
+        unsafe {
+            while pos < self.len {
+                match self.input.get_unchecked(pos) {
+                    b'"' => {
+                        self.pos = pos + 1;
+                        if has_escapes {
+                            let raw = self.input.get_unchecked(start..pos);
+                            return self.unescape_string(raw);
                         }
-                        b'\\' => {
-                            has_escapes = true;
-                            self.pos += 2; // skip escape sequence
-                        }
-                        _ => self.pos += 1,
+
+                        let s = std::str::from_utf8_unchecked(self.input.get_unchecked(start..pos));
+                        return Ok(Cow::Borrowed(s));
                     }
+                    b'\\' => {
+                        has_escapes = true;
+                        pos += 2;
+                    }
+                    _ => pos += 1,
                 }
             }
-
-            Err(JsonError::UnexpectedEnd)
         }
+
+        Err(JsonError::UnexpectedEnd)
     }
 
     /// Unescape a string with escape sequences

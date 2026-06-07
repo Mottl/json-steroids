@@ -1,4 +1,4 @@
-//! Benchmarks for json-steroids comparing with serde_json
+//! Benchmarks for json-steroids comparing with serde_json and sonic_rs
 
 use criterion::{black_box, criterion_group, criterion_main, Criterion, Throughput};
 use json_steroids::{from_str, parse, to_string, Json};
@@ -116,6 +116,10 @@ fn bench_serialize_simple_comparison(c: &mut Criterion) {
         b.iter(|| serde_json::to_string(black_box(&serde_data)).unwrap())
     });
 
+    group.bench_function("sonic_rs", |b| {
+        b.iter(|| sonic_rs::to_string(black_box(&serde_data)).unwrap())
+    });
+
     group.finish();
 }
 
@@ -130,6 +134,10 @@ fn bench_deserialize_simple_comparison(c: &mut Criterion) {
 
     group.bench_function("serde_json", |b| {
         b.iter(|| serde_json::from_str::<SerdeSimpleStruct>(black_box(json)))
+    });
+
+    group.bench_function("sonic_rs", |b| {
+        b.iter(|| sonic_rs::from_str::<SerdeSimpleStruct>(black_box(json)))
     });
 
     group.finish();
@@ -149,6 +157,10 @@ fn bench_serialize_complex_comparison(c: &mut Criterion) {
         b.iter(|| serde_json::to_string(black_box(&serde_data)).unwrap())
     });
 
+    group.bench_function("sonic_rs", |b| {
+        b.iter(|| sonic_rs::to_string(black_box(&serde_data)).unwrap())
+    });
+
     group.finish();
 }
 
@@ -164,6 +176,10 @@ fn bench_deserialize_complex_comparison(c: &mut Criterion) {
 
     group.bench_function("serde_json", |b| {
         b.iter(|| serde_json::from_str::<SerdeComplexStruct>(black_box(&json)))
+    });
+
+    group.bench_function("sonic_rs", |b| {
+        b.iter(|| sonic_rs::from_str::<SerdeComplexStruct>(black_box(&json)))
     });
 
     group.finish();
@@ -189,6 +205,13 @@ fn bench_roundtrip_comparison(c: &mut Criterion) {
         })
     });
 
+    group.bench_function("sonic_rs", |b| {
+        b.iter(|| {
+            let json = sonic_rs::to_string(black_box(&serde_data)).unwrap();
+            sonic_rs::from_str::<SerdeComplexStruct>(&json)
+        })
+    });
+
     group.finish();
 }
 
@@ -201,6 +224,10 @@ fn bench_parse_dynamic_comparison(c: &mut Criterion) {
 
     group.bench_function("serde_json", |b| {
         b.iter(|| serde_json::from_str::<serde_json::Value>(black_box(json)))
+    });
+
+    group.bench_function("sonic_rs", |b| {
+        b.iter(|| sonic_rs::from_str::<sonic_rs::Value>(black_box(json)))
     });
 
     group.finish();
@@ -236,6 +263,10 @@ fn bench_large_array_comparison(c: &mut Criterion) {
         b.iter(|| serde_json::to_string(black_box(&serde_data)).unwrap())
     });
 
+    group.bench_function("sonic_rs", |b| {
+        b.iter(|| sonic_rs::to_string(black_box(&serde_data)).unwrap())
+    });
+
     group.finish();
 
     let json = to_string(&json_steroids_data);
@@ -249,6 +280,10 @@ fn bench_large_array_comparison(c: &mut Criterion) {
 
     group.bench_function("serde_json", |b| {
         b.iter(|| serde_json::from_str::<SerdeArrayWrapper>(black_box(&json)))
+    });
+
+    group.bench_function("sonic_rs", |b| {
+        b.iter(|| sonic_rs::from_str::<SerdeArrayWrapper>(black_box(&json)))
     });
 
     group.finish();
@@ -268,6 +303,10 @@ fn bench_string_escaping_comparison(c: &mut Criterion) {
         b.iter(|| serde_json::to_string(black_box(&simple)).unwrap())
     });
 
+    group.bench_function("sonic_rs", |b| {
+        b.iter(|| sonic_rs::to_string(black_box(&simple)).unwrap())
+    });
+
     group.finish();
 
     let mut group = c.benchmark_group("string_serialize_with_escapes");
@@ -278,6 +317,10 @@ fn bench_string_escaping_comparison(c: &mut Criterion) {
 
     group.bench_function("serde_json", |b| {
         b.iter(|| serde_json::to_string(black_box(&escaped)).unwrap())
+    });
+
+    group.bench_function("sonic_rs", |b| {
+        b.iter(|| sonic_rs::to_string(black_box(&escaped)).unwrap())
     });
 
     group.finish();
@@ -307,6 +350,10 @@ fn bench_deeply_nested_comparison(c: &mut Criterion) {
 
     group.bench_function("serde_json", |b| {
         b.iter(|| serde_json::from_str::<serde_json::Value>(black_box(json)))
+    });
+
+    group.bench_function("sonic_rs", |b| {
+        b.iter(|| sonic_rs::from_str::<sonic_rs::Value>(black_box(json)))
     });
 
     group.finish();
@@ -397,6 +444,10 @@ fn bench_many_fields_comparison(c: &mut Criterion) {
         b.iter(|| serde_json::to_string(black_box(&serde_data)).unwrap())
     });
 
+    group.bench_function("sonic_rs", |b| {
+        b.iter(|| sonic_rs::to_string(black_box(&serde_data)).unwrap())
+    });
+
     group.finish();
 
     let json = to_string(&steroids_data);
@@ -409,6 +460,10 @@ fn bench_many_fields_comparison(c: &mut Criterion) {
 
     group.bench_function("serde_json", |b| {
         b.iter(|| serde_json::from_str::<SerdeManyFields>(black_box(&json)))
+    });
+
+    group.bench_function("sonic_rs", |b| {
+        b.iter(|| sonic_rs::from_str::<SerdeManyFields>(black_box(&json)))
     });
 
     group.finish();
@@ -429,6 +484,10 @@ fn bench_numbers_comparison(c: &mut Criterion) {
         b.iter(|| serde_json::to_string(black_box(&integers)).unwrap())
     });
 
+    group.bench_function("sonic_rs", |b| {
+        b.iter(|| sonic_rs::to_string(black_box(&integers)).unwrap())
+    });
+
     group.finish();
 
     // Float serialization
@@ -443,6 +502,10 @@ fn bench_numbers_comparison(c: &mut Criterion) {
 
     group.bench_function("serde_json", |b| {
         b.iter(|| serde_json::to_string(black_box(&floats)).unwrap())
+    });
+
+    group.bench_function("sonic_rs", |b| {
+        b.iter(|| sonic_rs::to_string(black_box(&floats)).unwrap())
     });
 
     group.finish();
@@ -489,6 +552,13 @@ fn bench_cow_struct_comparison(c: &mut Criterion) {
         })
     });
 
+    group.bench_function("sonic_rs/deserialize borrowed", |b| {
+        b.iter(|| {
+            let result: SerdeUserDataBorrowed = sonic_rs::from_str(black_box(json)).unwrap();
+            black_box(result)
+        })
+    });
+
     group.finish();
 
     let serde_borrowed_data = SerdeUserDataBorrowed {
@@ -513,6 +583,10 @@ fn bench_cow_struct_comparison(c: &mut Criterion) {
 
     group.bench_function("serde_json/serialize borrowed", |b| {
         b.iter(|| serde_json::to_string(black_box(&serde_borrowed_data)).unwrap())
+    });
+
+    group.bench_function("sonic_rs/serialize borrowed", |b| {
+        b.iter(|| sonic_rs::to_string(black_box(&serde_borrowed_data)).unwrap())
     });
 
     group.finish();
@@ -551,6 +625,13 @@ fn bench_borrowed_str_struct_comparison(c: &mut Criterion) {
     group.bench_function("serde_json", |b| {
         b.iter(|| {
             let result: SerdeUserBorrowed = serde_json::from_str(black_box(json)).unwrap();
+            black_box(result)
+        })
+    });
+
+    group.bench_function("sonic_rs", |b| {
+        b.iter(|| {
+            let result: SerdeUserBorrowed = sonic_rs::from_str(black_box(json)).unwrap();
             black_box(result)
         })
     });
