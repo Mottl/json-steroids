@@ -22,7 +22,7 @@ Add to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-json-steroids = "0.1.2"
+json-steroids = "0.3.0"
 ```
 
 ## Quick Start
