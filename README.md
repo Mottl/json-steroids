@@ -210,6 +210,32 @@ struct ApiResponse {
 }
 ```
 
+### Default values for optional fields
+
+Use the `#[json(default)]` or `#[json(default=custom_function)]` field
+attributes to set default values for optional fields:
+
+```rust
+use json_steroids::Json;
+use std::cell::OnceCell;
+
+#[derive(Json)]
+struct ApiResponse {
+    #[json(rename = "statusCode", default=200)]
+    status_code: u32,
+    #[json(default = custom)]
+    error_message: String,
+}
+
+fn custom() -> String {
+    let cell: OnceCell<String> = OnceCell::new();
+    let default_value = cell.get_or_init(|| {
+        String::from("Runtime default value")
+    });
+    default_value.to_string()
+}
+```
+
 ### Enum Support
 
 Enums are fully supported with different representations:

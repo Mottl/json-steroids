@@ -153,7 +153,7 @@ fn rt_u64_max() {
 
 #[test]
 fn rt_f64_basic() {
-    let v = 3.141592653589793f64;
+    let v = core::f64::consts::PI;
     let rt: f64 = from_str(&to_string(&v)).unwrap();
     assert!((rt - v).abs() < 1e-12);
 }
@@ -517,6 +517,34 @@ fn nested_struct_roundtrip() {
 }
 
 #[test]
+fn struct_with_default_fields() {
+    fn default_role() -> String {
+        "guest".to_string()
+    }
+
+    #[derive(Debug, PartialEq, json_steroids::JsonDeserialize)]
+    struct User {
+        name: String,
+
+        #[json(default = "default_role")]
+        role: String,
+
+        #[json(default)]
+        tags: Vec<String>,
+    }
+    let json_str = r#"{"name": "Alice"}"#;
+    let user: User = from_str(json_str).unwrap();
+    assert_eq!(
+        user,
+        User {
+            name: "Alice".to_string(),
+            role: default_role(),
+            tags: Vec::new()
+        }
+    )
+}
+
+#[test]
 fn all_primitives_roundtrip() {
     let v = AllPrimitives {
         b: true,
@@ -587,6 +615,37 @@ fn unit_enum_variant_roundtrip() {
     let v = Shape::Point;
     let rt: Shape = from_str(&to_string(&v)).unwrap();
     assert_eq!(rt, v);
+}
+
+#[test]
+fn enum_with_default_fields() {
+    fn default_role() -> String {
+        "guest".to_string()
+    }
+
+    #[derive(Debug, PartialEq, json_steroids::JsonDeserialize)]
+    enum User {
+        Student {
+            name: String,
+
+            #[json(default = "default_role")]
+            role: String,
+
+            #[json(default)]
+            tags: Vec<String>,
+        },
+        Teacher,
+    }
+    let json_str = r#"{"Student":{"name":"Alice"}}"#;
+    let user: User = from_str(json_str).unwrap();
+    assert_eq!(
+        user,
+        User::Student {
+            name: "Alice".to_string(),
+            role: default_role(),
+            tags: Vec::new()
+        }
+    )
 }
 
 // ─────────────────────────────────────────────

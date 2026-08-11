@@ -6,7 +6,7 @@ use proc_macro::TokenStream;
 use proc_macro2::TokenStream as TokenStream2;
 use proc_macro_crate::{crate_name, FoundCrate};
 use quote::{format_ident, quote};
-use syn::{parse_macro_input, Data, DeriveInput, Fields, Ident, Type};
+use syn::{parse_macro_input, Data, DeriveInput, Fields, Ident, Token, Type};
 
 /// Get the crate path - correctly resolves whether we are inside
 /// the `json_steroids` crate itself or an external consumer.
@@ -303,13 +303,27 @@ fn generate_deserialize_body(data: &Data, name: &Ident, krate: &TokenStream2) ->
                         let field_name_str = field_name.to_string();
                         let is_option = is_option_type(&f.ty);
 
-                        if is_option {
-                            quote! {
-                                #field_name: #field_name.unwrap_or(None)
+                        match get_field_default(&f.attrs) {
+                            FieldDefault::None => {
+                                if is_option {
+                                    quote! {
+                                        #field_name: #field_name.unwrap_or(None)
+                                    }
+                                } else {
+                                    quote! {
+                                        #field_name: #field_name.ok_or_else(|| #krate::JsonError::MissingField(#field_name_str.to_string()))?
+                                    }
+                                }
                             }
-                        } else {
-                            quote! {
-                                #field_name: #field_name.ok_or_else(|| #krate::JsonError::MissingField(#field_name_str.to_string()))?
+                            FieldDefault::Default => {
+                                quote! {
+                                    #field_name: #field_name.unwrap_or_else(Default::default)
+                                }
+                            }
+                            FieldDefault::Custom(path) => {
+                                quote! {
+                                    #field_name: #field_name.unwrap_or_else(#path)
+                                }
                             }
                         }
                     }).collect();
@@ -423,8 +437,30 @@ fn generate_deserialize_body(data: &Data, name: &Ident, krate: &TokenStream2) ->
                         let field_unwraps: Vec<TokenStream2> = fields.named.iter().map(|f| {
                             let field_name = f.ident.as_ref().unwrap();
                             let field_name_str = field_name.to_string();
-                            quote! {
-                                #field_name: #field_name.ok_or_else(|| #krate::JsonError::MissingField(#field_name_str.to_string()))?
+                            let is_option = is_option_type(&f.ty);
+
+                            match get_field_default(&f.attrs) {
+                                FieldDefault::None => {
+                                    if is_option {
+                                        quote! {
+                                            #field_name: #field_name.unwrap_or(None)
+                                        }
+                                    } else {
+                                        quote! {
+                                            #field_name: #field_name.ok_or_else(|| #krate::JsonError::MissingField(#field_name_str.to_string()))?
+                                        }
+                                    }
+                                }
+                                FieldDefault::Default => {
+                                    quote! {
+                                        #field_name: #field_name.unwrap_or_else(Default::default)
+                                    }
+                                }
+                                FieldDefault::Custom(path) => {
+                                    quote! {
+                                        #field_name: #field_name.unwrap_or_else(#path)
+                                    }
+                                }
                             }
                         }).collect();
 
@@ -479,6 +515,42 @@ fn generate_deserialize_body(data: &Data, name: &Ident, krate: &TokenStream2) ->
             quote! { compile_error!("Unions are not supported"); }
         }
     }
+}
+
+/// Enum for `#[json(default=..)]` field attribute
+enum FieldDefault {
+    None,              // no default value
+    Default,           // `#[json(default)]` - uses Default::default()
+    Custom(syn::Path), // `#[json(default=custom_function)]`
+}
+
+/// Scans field attributes for `#[json(default)]`
+fn get_field_default(attrs: &[syn::Attribute]) -> FieldDefault {
+    for attr in attrs {
+        if !attr.path().is_ident("json") {
+            continue;
+        }
+
+        let mut mode = FieldDefault::None;
+        let _ = attr.parse_nested_meta(|meta| {
+            if meta.path.is_ident("default") {
+                if meta.input.peek(Token![=]) {
+                    let lit: syn::LitStr = meta.value()?.parse()?;
+                    if let Ok(path) = lit.parse::<syn::Path>() {
+                        mode = FieldDefault::Custom(path);
+                    }
+                } else {
+                    mode = FieldDefault::Default;
+                }
+            }
+            Ok(())
+        });
+
+        if !matches!(mode, FieldDefault::None) {
+            return mode;
+        }
+    }
+    FieldDefault::None
 }
 
 fn get_field_name(attrs: &[syn::Attribute], default: &Ident) -> String {
