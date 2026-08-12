@@ -39,6 +39,7 @@ struct FieldAttrs {
     deserialize_with: Option<syn::Path>,
     skip_serializing: bool,
     skip_deserializing: bool,
+    aliases: Vec<String>,
 }
 
 /// Extracts a `syn::Path` from either a string literal or a path expression.
@@ -81,6 +82,7 @@ fn get_attr_name(path: &syn::Path) -> String {
 fn parse_field_attrs(attrs: &[syn::Attribute], field_name: &str) -> syn::Result<FieldAttrs> {
     let mut field_attrs = FieldAttrs {
         rename: None,
+        aliases: Vec::new(),
         default: FieldDefault::None,
         serialize_with: None,
         deserialize_with: None,
@@ -164,6 +166,20 @@ fn parse_field_attrs(attrs: &[syn::Attribute], field_name: &str) -> syn::Result<
                                     return Err(syn::Error::new_spanned(
                                     &nv.value,
                                     format!("field `{field_name}` has an invalid value for the `json` attribute flag `rename`: expected string literal"),
+                                ));
+                                }
+                            }
+                            Some("alias") => {
+                                if let syn::Expr::Lit(syn::ExprLit {
+                                    lit: syn::Lit::Str(lit_str),
+                                    ..
+                                }) = &nv.value
+                                {
+                                    field_attrs.aliases.push(lit_str.value());
+                                } else {
+                                    return Err(syn::Error::new_spanned(
+                                    &nv.value,
+                                    format!("field `{field_name}` has an invalid value for the `json` attribute flag `alias`: expected string literal"),
                                 ));
                                 }
                             }
@@ -386,6 +402,7 @@ fn generate_serialize_fields_named(
             continue;
         }
 
+        let json_key = attrs.rename.unwrap_or_else(|| field_name_str.clone());
         let field_accessor = get_accessor(field_name);
 
         let write_value = if let Some(ser_fn) = attrs.serialize_with {
@@ -403,7 +420,7 @@ fn generate_serialize_fields_named(
 
         field_serializations.push(quote! {
             #comma
-            writer.write_unescape_key(#field_name_str);
+            writer.write_unescape_key(#json_key);
             #write_value
         });
     }
@@ -662,10 +679,22 @@ fn generate_named_field_de(f: &syn::Field, krate: &TokenStream2) -> syn::Result<
         quote! { #krate::JsonDeserialize::json_deserialize(parser)? }
     };
 
-    let match_arm = Some(quote! {
+    let mut match_arms = vec![quote! {
         #json_key => {
             #field_name = Some(#read_value);
         }
+    }];
+
+    for alias in &attrs.aliases {
+        match_arms.push(quote! {
+            #alias => {
+                #field_name = Some(#read_value);
+            }
+        });
+    }
+
+    let match_arm = Some(quote! {
+        #(#match_arms)*
     });
 
     let unwrap = match &attrs.default {

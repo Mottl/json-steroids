@@ -194,9 +194,11 @@ struct Config {
 }
 ```
 
-### Field Renaming
+### Field renaming and aliasing
 
-Use the `#[json(rename = "...")]` attribute to customize field names in JSON:
+Use `#[json(rename = "...")]` attribute to set the corresponding field names in JSON.
+Use `#[json(alias = "...")]` to create a deserialization alias for the desired field
+(multiple alias flags for a single field are supported).
 
 ```rust
 use json_steroids::Json;
@@ -205,7 +207,7 @@ use json_steroids::Json;
 struct ApiResponse {
     #[json(rename = "statusCode")]
     status_code: u32,
-    #[json(rename = "errorMessage")]
+    #[json(rename = "errorMessage", alias="msg")]
     error_message: Option<String>,
 }
 ```

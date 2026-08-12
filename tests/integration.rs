@@ -517,6 +517,27 @@ fn nested_struct_roundtrip() {
 }
 
 #[test]
+fn struct_with_rename_and_alias() {
+    #[derive(Debug, PartialEq, json_steroids::Json)]
+    struct User {
+        #[json(rename = "Name", alias = "n")]
+        name: String,
+    }
+    assert_eq!(
+        from_str::<User>(r#"{"n": "Alice"}"#).unwrap(),
+        User {
+            name: "Alice".to_string(),
+        }
+    );
+    assert_eq!(
+        to_string(&User {
+            name: "Alice".to_string(),
+        }),
+        r#"{"Name":"Alice"}"#
+    )
+}
+
+#[test]
 fn struct_with_default_fields() {
     fn default_role() -> String {
         "guest".to_string()
@@ -704,6 +725,29 @@ fn unit_enum_variant_roundtrip() {
     let v = Shape::Point;
     let rt: Shape = from_str(&to_string(&v)).unwrap();
     assert_eq!(rt, v);
+}
+
+#[test]
+fn enum_with_rename_and_alias() {
+    #[derive(Debug, PartialEq, json_steroids::Json)]
+    enum User {
+        VariantA {
+            #[json(rename = "Name", alias = "n")]
+            name: String,
+        },
+    }
+    assert_eq!(
+        from_str::<User>(r#"{"VariantA":{"n": "Alice"}}"#).unwrap(),
+        User::VariantA {
+            name: "Alice".to_string(),
+        }
+    );
+    assert_eq!(
+        to_string(&User::VariantA {
+            name: "Alice".to_string(),
+        }),
+        r#"{"VariantA":{"Name":"Alice"}}"#
+    )
 }
 
 #[test]
