@@ -30,7 +30,13 @@ enum FieldDefault {
     Custom(syn::Path), // `#[json(default=custom_function)]`
 }
 
-/// A list of attributes for a single field
+/// Container-level attributes
+#[derive(Clone)]
+struct ContainerAttrs {
+    rename_all: Option<String>,
+}
+
+/// Field-level attributes
 #[derive(Clone)]
 struct FieldAttrs {
     rename: Option<String>,
@@ -40,6 +46,92 @@ struct FieldAttrs {
     skip_serializing: bool,
     skip_deserializing: bool,
     aliases: Vec<String>,
+}
+
+fn validate_case(case: &str) -> bool {
+    matches!(
+        case,
+        "lowercase"
+            | "UPPERCASE"
+            | "PascalCase"
+            | "camelCase"
+            | "snake_case"
+            | "SCREAMING_SNAKE_CASE"
+            | "kebab-case"
+            | "SCREAMING-KEBAB-CASE"
+    )
+}
+
+/// Split `identifier` by words. Used by [`apply_case`] function.
+fn split_by_words(identifier: &str) -> Vec<String> {
+    let mut words = Vec::new();
+    let mut current = String::new();
+    let mut chars = identifier.chars().peekable();
+
+    while let Some(c) = chars.next() {
+        if c == '_' {
+            if !current.is_empty() {
+                words.push(current.clone());
+                current.clear();
+            }
+        } else if c.is_uppercase() {
+            if !current.is_empty() {
+                let prev_is_lower = current.chars().last().is_some_and(|ch| ch.is_lowercase());
+                let next_is_lower = chars.peek().is_some_and(|ch| ch.is_lowercase());
+
+                if prev_is_lower || next_is_lower {
+                    words.push(current.clone());
+                    current.clear();
+                }
+            }
+            current.push(c.to_lowercase().next().unwrap());
+        } else {
+            current.push(c);
+        }
+    }
+    if !current.is_empty() {
+        words.push(current);
+    }
+    words
+}
+
+/// Case converter for `#[json(rename_all = ...)]` attribute
+fn apply_case(identifier: &str, case: &str) -> String {
+    let words = split_by_words(identifier);
+    match case {
+        "lowercase" => words.join("").to_lowercase(),
+        "UPPERCASE" => words.join("").to_uppercase(),
+        "PascalCase" => words
+            .iter()
+            .map(|w| {
+                let mut c = w.chars();
+                match c.next() {
+                    None => String::new(),
+                    Some(f) => f.to_uppercase().collect::<String>() + c.as_str(),
+                }
+            })
+            .collect(),
+        "camelCase" => {
+            let mut res = String::new();
+            for (i, w) in words.iter().enumerate() {
+                if i == 0 {
+                    res.push_str(&w.to_lowercase());
+                } else {
+                    let mut c = w.chars();
+                    if let Some(f) = c.next() {
+                        res.push_str(&f.to_uppercase().collect::<String>());
+                        res.push_str(c.as_str());
+                    }
+                }
+            }
+            res
+        }
+        "snake_case" => words.join("_").to_lowercase(),
+        "SCREAMING_SNAKE_CASE" => words.join("_").to_uppercase(),
+        "kebab-case" => words.join("-").to_lowercase(),
+        "SCREAMING-KEBAB-CASE" => words.join("-").to_uppercase(),
+        _ => words.join(""),
+    }
 }
 
 /// Extracts a `syn::Path` from either a string literal or a path expression.
@@ -82,12 +174,12 @@ fn get_attr_name(path: &syn::Path) -> String {
 fn parse_field_attrs(attrs: &[syn::Attribute], field_name: &str) -> syn::Result<FieldAttrs> {
     let mut field_attrs = FieldAttrs {
         rename: None,
-        aliases: Vec::new(),
         default: FieldDefault::None,
         serialize_with: None,
         deserialize_with: None,
         skip_serializing: false,
         skip_deserializing: false,
+        aliases: Vec::new(),
     };
 
     for attr in attrs {
@@ -266,6 +358,76 @@ fn parse_field_attrs(attrs: &[syn::Attribute], field_name: &str) -> syn::Result<
     Ok(field_attrs)
 }
 
+fn parse_container_attrs(attrs: &[syn::Attribute]) -> syn::Result<ContainerAttrs> {
+    let mut container_attrs = ContainerAttrs { rename_all: None };
+
+    for attr in attrs {
+        if attr.path().is_ident("json") {
+            let nested = attr.parse_args_with(
+                syn::punctuated::Punctuated::<syn::Meta, syn::Token![,]>::parse_terminated,
+            )?;
+            for meta in nested {
+                match meta {
+                    syn::Meta::NameValue(nv) => {
+                        let attr_ident = nv.path.get_ident().map(|i| i.to_string());
+                        match attr_ident.as_deref() {
+                            Some("rename_all") => {
+                                if container_attrs.rename_all.is_some() {
+                                    return Err(syn::Error::new_spanned(
+                                        &nv.path,
+                                        "duplicate `json` attribute flag: `rename_all`",
+                                    ));
+                                }
+                                if let syn::Expr::Lit(syn::ExprLit {
+                                    lit: syn::Lit::Str(lit_str),
+                                    ..
+                                }) = &nv.value
+                                {
+                                    let val = lit_str.value();
+                                    if !validate_case(&val) {
+                                        return Err(syn::Error::new_spanned(
+                                            &nv.value,
+                                            format!("invalid value for `rename_all`: `{}`. Expected one of: lowercase, UPPERCASE, PascalCase, camelCase, snake_case, SCREAMING_SNAKE_CASE, kebab-case, SCREAMING-KEBAB-CASE", val),
+                                        ));
+                                    }
+                                    container_attrs.rename_all = Some(val);
+                                } else {
+                                    return Err(syn::Error::new_spanned(
+                                        &nv.value,
+                                        "invalid value for the `json` attribute flag `rename_all`: expected string literal",
+                                    ));
+                                }
+                            }
+                            _ => {
+                                let attr_name = get_attr_name(&nv.path);
+                                return Err(syn::Error::new_spanned(
+                                    &nv.path,
+                                    format!("unsupported `json` container attribute: {attr_name}"),
+                                ));
+                            }
+                        }
+                    }
+                    syn::Meta::Path(path) => {
+                        let attr_name = get_attr_name(&path);
+                        return Err(syn::Error::new_spanned(
+                            &path,
+                            format!("unsupported `json` container attribute: {attr_name}"),
+                        ));
+                    }
+                    syn::Meta::List(list) => {
+                        let attr_name = get_attr_name(&list.path);
+                        return Err(syn::Error::new_spanned(
+                            &list,
+                            format!("unsupported `json` container attribute: {attr_name}"),
+                        ));
+                    }
+                }
+            }
+        }
+    }
+    Ok(container_attrs)
+}
+
 /// Derive macro for JSON serialization
 ///
 /// # Example
@@ -290,7 +452,10 @@ fn expand_derive_json_serialize(input: DeriveInput) -> syn::Result<TokenStream2>
     let (impl_generics, ty_generics, where_clause) = generics.split_for_impl();
     let krate = crate_path();
 
-    let serialize_body = generate_serialize_body(&input.data, name, &krate)?;
+    let container_attrs = parse_container_attrs(&input.attrs)?;
+    let rename_all = container_attrs.rename_all.as_deref();
+
+    let serialize_body = generate_serialize_body(&input.data, name, &krate, rename_all)?;
 
     Ok(quote! {
         impl #impl_generics #krate::JsonSerialize for #name #ty_generics #where_clause {
@@ -324,7 +489,10 @@ fn expand_derive_json_deserialize(input: DeriveInput) -> syn::Result<TokenStream
     let generics = &input.generics;
     let krate = crate_path();
 
-    let deserialize_body = generate_deserialize_body(&input.data, name, &krate)?;
+    let container_attrs = parse_container_attrs(&input.attrs)?;
+    let rename_all = container_attrs.rename_all.as_deref();
+
+    let deserialize_body = generate_deserialize_body(&input.data, name, &krate, rename_all)?;
 
     // Add 'de lifetime to generics only if it doesn't already exist
     let mut generics_with_de = generics.clone();
@@ -358,8 +526,11 @@ fn expand_derive_json(input: DeriveInput) -> syn::Result<TokenStream2> {
     let generics = &input.generics;
     let krate = crate_path();
 
-    let serialize_body = generate_serialize_body(&input.data, name, &krate)?;
-    let deserialize_body = generate_deserialize_body(&input.data, name, &krate)?;
+    let container_attrs = parse_container_attrs(&input.attrs)?;
+    let rename_all = container_attrs.rename_all.as_deref();
+
+    let serialize_body = generate_serialize_body(&input.data, name, &krate, rename_all)?;
+    let deserialize_body = generate_deserialize_body(&input.data, name, &krate, rename_all)?;
 
     // For serialize: use normal generics
     let (impl_generics, ty_generics, where_clause) = generics.split_for_impl();
@@ -391,6 +562,7 @@ fn generate_serialize_fields_named(
     fields: &syn::punctuated::Punctuated<syn::Field, syn::Token![,]>,
     get_accessor: impl Fn(&Ident) -> TokenStream2,
     krate: &TokenStream2,
+    rename_all: Option<&str>,
 ) -> syn::Result<Vec<TokenStream2>> {
     let mut field_serializations = Vec::new();
     let mut first = true;
@@ -402,7 +574,14 @@ fn generate_serialize_fields_named(
             continue;
         }
 
-        let json_key = attrs.rename.unwrap_or_else(|| field_name_str.clone());
+        let json_key = if let Some(rename) = attrs.rename {
+            rename
+        } else if let Some(case) = rename_all {
+            apply_case(&field_name_str, case)
+        } else {
+            field_name_str.clone()
+        };
+
         let field_accessor = get_accessor(field_name);
 
         let write_value = if let Some(ser_fn) = attrs.serialize_with {
@@ -431,6 +610,7 @@ fn generate_serialize_fields_unnamed(
     fields: &syn::punctuated::Punctuated<syn::Field, syn::Token![,]>,
     get_accessor: impl Fn(usize) -> TokenStream2,
     krate: &TokenStream2,
+    _rename_all: Option<&str>,
 ) -> syn::Result<Vec<TokenStream2>> {
     let mut field_serializations = Vec::new();
     let mut first = true;
@@ -468,6 +648,7 @@ fn generate_serialize_body(
     data: &Data,
     _name: &Ident,
     krate: &TokenStream2,
+    rename_all: Option<&str>,
 ) -> syn::Result<TokenStream2> {
     match data {
         Data::Struct(data_struct) => match &data_struct.fields {
@@ -476,6 +657,7 @@ fn generate_serialize_body(
                     &fields.named,
                     |name| quote! { &self.#name },
                     krate,
+                    rename_all,
                 )?;
 
                 Ok(quote! {
@@ -493,6 +675,7 @@ fn generate_serialize_body(
                         quote! { &self.#idx }
                     },
                     krate,
+                    rename_all,
                 )?;
 
                 Ok(quote! {
@@ -513,12 +696,25 @@ fn generate_serialize_body(
             for variant in &data_enum.variants {
                 let variant_name = &variant.ident;
                 let variant_name_str = variant_name.to_string();
+                let variant_attrs = parse_field_attrs(&variant.attrs, &variant_name_str)?;
+
+                if variant_attrs.skip_serializing {
+                    continue;
+                }
+
+                let variant_json_key = if let Some(rename) = variant_attrs.rename {
+                    rename
+                } else if let Some(case) = rename_all {
+                    apply_case(&variant_name_str, case)
+                } else {
+                    variant_name_str.clone()
+                };
 
                 match &variant.fields {
                     Fields::Unit => {
                         variants.push(quote! {
                             Self::#variant_name => {
-                                writer.write_string(#variant_name_str);
+                                writer.write_string(#variant_json_key);
                             }
                         });
                     }
@@ -549,12 +745,13 @@ fn generate_serialize_body(
                                 quote! { #name }
                             },
                             krate,
+                            rename_all,
                         )?;
 
                         variants.push(quote! {
                             Self::#variant_name(#(#pattern_fields),*) => {
                                 writer.begin_object();
-                                writer.write_unescape_key(#variant_name_str);
+                                writer.write_unescape_key(#variant_json_key);
                                 writer.begin_array();
                                 #(#field_serializations)*
                                 writer.end_array();
@@ -580,6 +777,7 @@ fn generate_serialize_body(
                             &fields.named,
                             |name| quote! { #name },
                             krate,
+                            rename_all,
                         )?;
 
                         let pattern = if used_field_names.len() == fields.named.len() {
@@ -599,7 +797,7 @@ fn generate_serialize_body(
                         variants.push(quote! {
                             #pattern => {
                                 writer.begin_object();
-                                writer.write_unescape_key(#variant_name_str);
+                                writer.write_unescape_key(#variant_json_key);
                                 writer.begin_object();
                                 #(#field_serializations)*
                                 writer.end_object();
@@ -630,7 +828,11 @@ struct NamedFieldDe {
     unwrap: TokenStream2,
 }
 
-fn generate_named_field_de(f: &syn::Field, krate: &TokenStream2) -> syn::Result<NamedFieldDe> {
+fn generate_named_field_de(
+    f: &syn::Field,
+    krate: &TokenStream2,
+    rename_all: Option<&str>,
+) -> syn::Result<NamedFieldDe> {
     let field_name = f.ident.as_ref().unwrap();
     let field_name_str = field_name.to_string();
     let attrs = parse_field_attrs(&f.attrs, &field_name_str)?;
@@ -668,10 +870,13 @@ fn generate_named_field_de(f: &syn::Field, krate: &TokenStream2) -> syn::Result<
 
     let declaration = quote! { let mut #field_name = None; };
 
-    let json_key = attrs
-        .rename
-        .clone()
-        .unwrap_or_else(|| field_name_str.clone());
+    let json_key = if let Some(rename) = attrs.rename {
+        rename
+    } else if let Some(case) = rename_all {
+        apply_case(&field_name_str, case)
+    } else {
+        field_name_str.clone()
+    };
 
     let read_value = if let Some(de_fn) = &attrs.deserialize_with {
         quote! { #de_fn(parser)? }
@@ -714,7 +919,7 @@ fn generate_named_field_de(f: &syn::Field, krate: &TokenStream2) -> syn::Result<
             } else {
                 quote! {
                     #field_name: #field_name.ok_or_else(|| {
-                        #krate::JsonError::MissingField(#field_name_str.to_string())
+                        #krate::JsonError::MissingField(#json_key.to_string())
                     })?
                 }
             }
@@ -770,6 +975,7 @@ fn generate_deserialize_body(
     data: &Data,
     name: &Ident,
     krate: &TokenStream2,
+    rename_all: Option<&str>,
 ) -> syn::Result<TokenStream2> {
     match data {
         Data::Struct(data_struct) => match &data_struct.fields {
@@ -779,7 +985,7 @@ fn generate_deserialize_body(
                 let mut field_unwraps = Vec::with_capacity(fields.named.len());
 
                 for f in &fields.named {
-                    let de = generate_named_field_de(f, krate)?;
+                    let de = generate_named_field_de(f, krate, rename_all)?;
                     field_declarations.push(de.declaration);
                     if let Some(m) = de.match_arm {
                         field_matches.push(m);
@@ -837,14 +1043,27 @@ fn generate_deserialize_body(
             for variant in &data_enum.variants {
                 let variant_name = &variant.ident;
                 let variant_name_str = variant_name.to_string();
+                let variant_attrs = parse_field_attrs(&variant.attrs, &variant_name_str)?;
+
+                if variant_attrs.skip_deserializing {
+                    continue;
+                }
+
+                let variant_json_key = if let Some(rename) = variant_attrs.rename {
+                    rename
+                } else if let Some(case) = rename_all {
+                    apply_case(&variant_name_str, case)
+                } else {
+                    variant_name_str.clone()
+                };
 
                 match &variant.fields {
                     Fields::Unit => {
                         unit_string_matches.push(quote! {
-                            #variant_name_str => Ok(#name::#variant_name),
+                            #variant_json_key => Ok(#name::#variant_name),
                         });
                         object_variant_matches.push(quote! {
-                            #variant_name_str => {
+                            #variant_json_key => {
                                 parser.expect_null()?;
                                 parser.expect_object_end()?;
                                 Ok(#name::#variant_name)
@@ -866,7 +1085,7 @@ fn generate_deserialize_body(
                         }
 
                         object_variant_matches.push(quote! {
-                            #variant_name_str => {
+                            #variant_json_key => {
                                 parser.expect_array_start()?;
                                 #(#field_deserializations)*
                                 parser.expect_array_end()?;
@@ -881,7 +1100,7 @@ fn generate_deserialize_body(
                         let mut field_unwraps = Vec::with_capacity(fields.named.len());
 
                         for f in &fields.named {
-                            let de = generate_named_field_de(f, krate)?;
+                            let de = generate_named_field_de(f, krate, rename_all)?;
                             field_declarations.push(de.declaration);
                             if let Some(m) = de.match_arm {
                                 field_matches.push(m);
@@ -890,7 +1109,7 @@ fn generate_deserialize_body(
                         }
 
                         object_variant_matches.push(quote! {
-                            #variant_name_str => {
+                            #variant_json_key => {
                                 parser.expect_object_start()?;
                                 #(#field_declarations)*
 

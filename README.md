@@ -212,6 +212,16 @@ struct ApiResponse {
 }
 ```
 
+To rename all the fields and enum variants use container-level `rename_all` attribute:
+```rust
+#[derive(Json)]
+#[json(rename_all = "camelCase")]
+enum ApiResult {
+    Ok { return_value: f64 }, // -> {"ok":{"returnValue": 2.71828}}
+    Error { error_code: i16}, // -> {"error":{"errorCode": -1}}
+}
+```
+
 ### Skipping fields
 
 Use the `#[json(skip_deserializing)]` and `#[json(skip_serializing)]` attributes

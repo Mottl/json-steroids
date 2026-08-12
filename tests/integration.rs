@@ -517,6 +517,27 @@ fn nested_struct_roundtrip() {
 }
 
 #[test]
+fn struct_with_rename_all() {
+    #[derive(Debug, PartialEq, json_steroids::Json)]
+    #[json(rename_all = "camelCase")]
+    struct User {
+        user_name: String,
+    }
+    assert_eq!(
+        from_str::<User>(r#"{"userName": "alice"}"#).unwrap(),
+        User {
+            user_name: "alice".to_string(),
+        }
+    );
+    assert_eq!(
+        to_string(&User {
+            user_name: "alice".to_string(),
+        }),
+        r#"{"userName":"alice"}"#
+    )
+}
+
+#[test]
 fn struct_with_rename_and_alias() {
     #[derive(Debug, PartialEq, json_steroids::Json)]
     struct User {
@@ -728,6 +749,27 @@ fn unit_enum_variant_roundtrip() {
 }
 
 #[test]
+fn enum_with_rename_all() {
+    #[derive(Debug, PartialEq, json_steroids::Json)]
+    #[json(rename_all = "camelCase")]
+    enum User {
+        VariantA { user_name: String },
+    }
+    assert_eq!(
+        from_str::<User>(r#"{"variantA": {"userName": "alice"}}"#).unwrap(),
+        User::VariantA {
+            user_name: "alice".to_string(),
+        }
+    );
+    assert_eq!(
+        to_string(&User::VariantA {
+            user_name: "alice".to_string(),
+        }),
+        r#"{"variantA":{"userName":"alice"}}"#
+    )
+}
+
+#[test]
 fn enum_with_rename_and_alias() {
     #[derive(Debug, PartialEq, json_steroids::Json)]
     enum User {
@@ -747,7 +789,7 @@ fn enum_with_rename_and_alias() {
             name: "Alice".to_string(),
         }),
         r#"{"VariantA":{"Name":"Alice"}}"#
-    )
+    );
 }
 
 #[test]
