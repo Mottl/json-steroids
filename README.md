@@ -210,6 +210,22 @@ struct ApiResponse {
 }
 ```
 
+### Skipping fields
+
+Use the `#[json(skip_deserializing)]` and `#[json(skip_serializing)]` attributes
+(or just `#[json(skip)]` for both) to skip desired fields:
+
+```rust
+use json_steroids::Json;
+
+#[derive(Default, Json)]
+struct User {
+    name: String,
+    #[json(skip)]
+    token: String,
+}
+```
+
 ### Default values for optional fields
 
 Use the `#[json(default)]` or `#[json(default=custom_function)]` field
@@ -233,6 +249,66 @@ fn custom() -> String {
         String::from("Runtime default value")
     });
     default_value.to_string()
+}
+```
+
+### Custom serialization and deserialization functions
+
+Use the `#[json(serialize_with=custom_ser_function)]` and/or `#[json(deserialize_with=custom_de_function)]` field
+attributes to set custom serializer and deserializer functions:
+
+```rust
+use json_steroids::Json;
+
+#[derive(Json)]
+struct ApiResponse {
+    #[json(serialize_with = ser_status, deserialize_with = de_status)]
+    status: bool,
+}
+
+fn ser_status<W: json_steroids::writer::Writer>(
+    value: &bool,
+    writer: &mut json_steroids::JsonWriter<W>,
+) {
+    if *value {
+        writer.write_string("OK")
+    } else {
+        writer.write_string("Error")
+    }
+}
+
+fn de_status<'de>(parser: &mut json_steroids::JsonParser<'de>) -> json_steroids::Result<bool> {
+    let pos = parser.position();
+    let s = parser.parse_string()?;
+    match &*s {
+        "OK" => Ok(true),
+        "Error" => Ok(false),
+        _ => Err(json_stroids::JsonError::Custom(format!("Unknown status at position {pos}: `{s}`")))
+    }
+}
+```
+
+You can also create a dedicated module with `serialize` and `deserialize` functions and specify its name inside `with = path::to::module` flag:
+
+```rust
+#[derive(Json)]
+struct ApiResponse {
+    #[json(with = custom_ser_de)]
+    status: bool,
+}
+
+mod custom_ser_de {
+    fn serialize<W: json_steroids::writer::Writer>(
+        value: &bool,
+        writer: &mut json_steroids::JsonWriter<W>,
+    ) {
+        // ..
+    }
+
+    // change FieldType to type of a given field
+    fn deserialize<'de>(parser: &mut json_steroids::JsonParser<'de>) -> json_steroids::Result<FieldType> {
+        // ..
+    }
 }
 ```
 
